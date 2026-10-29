@@ -25,7 +25,7 @@ interface RouteSyncFailure {
 	error: Error;
 }
 
-const ROUTE_SYNC_TIMEOUT_MS = 3_000;
+const ROUTE_SYNC_TIMEOUT_MS = 20_000;
 const ROUTE_MAINTENANCE_INTERVAL_MS = 10_000;
 
 export class EasyTierRpc {

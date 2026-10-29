@@ -9,13 +9,14 @@ export interface Connection extends RpcPeer {
 	secure: SecurePeer;
 	remotePublicKey: Uint8Array;
 	phase: ConnectionPhase;
+	openedAt: number;
 	handshakeTimer: ReturnType<typeof setTimeout> | null;
 	sendWindowStartedAt: number;
 	sentBytesInWindow: number;
 	sentFramesInWindow: number;
 }
 
-const HANDSHAKE_TIMEOUT_MS = 10_000;
+const HANDSHAKE_TIMEOUT_MS = 30_000;
 const SEND_WINDOW_MS = 1_000;
 const MAX_SEND_BYTES_PER_WINDOW = 32 * 1024 * 1024;
 const MAX_SEND_FRAMES_PER_WINDOW = 4_096;
@@ -30,6 +31,7 @@ export function createConnection(
 		secure,
 		remotePublicKey: new Uint8Array(),
 		phase: "msg1",
+		openedAt: Date.now(),
 		peerId: 0,
 		networkName: "",
 		serverSessionId: randomU64(),

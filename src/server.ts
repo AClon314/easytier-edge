@@ -80,7 +80,20 @@ export class EasyTierServer extends DurableObject<EasyTierEnv> {
 				this.failConnection(connection, error);
 			}
 		});
-		server.addEventListener("close", () => this.removeConnection(connection));
+		server.addEventListener("close", (event) => {
+			// 客户端主动断开/网络掉线：服务端侧也留一条记录，否则这类断开完全不可观测。
+			if (connection.phase !== "closed") {
+				console.log("EasyTier session closed by peer", {
+					code: event.code,
+					reason: event.reason,
+					phase: connection.phase,
+					peerId: connection.peerId || undefined,
+					networkName: connection.networkName || undefined,
+					lifetimeMs: Date.now() - connection.openedAt,
+				});
+			}
+			this.removeConnection(connection);
+		});
 		server.addEventListener("error", () => this.removeConnection(connection));
 
 		return new Response(null, { status: 101, webSocket: client });
@@ -200,7 +213,20 @@ export class EasyTierServer extends DurableObject<EasyTierEnv> {
 			const result = this.rpc.handleRequest(connection, clearPacket.payload);
 			if (result === "route") this.broadcastRouteUpdate(connection.networkName, connection.peerId);
 		} else {
-			this.rpc.handleResponse(connection, clearPacket.payload);
+			// 高 RTT 链路上（国内手机 -> Cloudflare -> DO，RTT 350~2000ms），客户端对路由同步
+			// RPC 的应答经常会晚于 wasm 侧的事务死线，或被 JS 侧的重传逻辑复制出第二份。
+			// 这类"迟到/重复应答"不是协议违规：直接忽略即可 —— cleanExpired 会带 forceFull
+			// 再发一次，最终仍能收敛。**绝不能因此关闭连接**，否则会变成
+			// "路由同步超时 -> 踢连接 -> 客户端重连 -> 立刻又同步 -> 再超时" 的重连风暴。
+			try {
+				this.rpc.handleResponse(connection, clearPacket.payload);
+			} catch (error) {
+				console.warn("EasyTier stale RPC response ignored", {
+					networkName: connection.networkName,
+					peerId: connection.peerId,
+					error: errorMessage(error),
+				});
+			}
 		}
 	}
 
@@ -291,6 +317,14 @@ export class EasyTierServer extends DurableObject<EasyTierEnv> {
 
 	private close(connection: Connection, code: number, reason: string): void {
 		if (connection.phase === "closed") return;
+		console.log("EasyTier session closed by server", {
+			code,
+			reason,
+			phase: connection.phase,
+			peerId: connection.peerId || undefined,
+			networkName: connection.networkName || undefined,
+			lifetimeMs: Date.now() - connection.openedAt,
+		});
 		try {
 			connection.socket.close(code, reason.slice(0, 120));
 		} finally {
